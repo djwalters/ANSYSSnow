@@ -1,0 +1,279 @@
+/COM
+/COM ****************************************
+/COM ANSYS Mechanical APDL input file
+/COM
+/COM Author: David J Walters
+/COM         Montana State University
+/COM Version 1.0, 2014-04-10
+/COM Version 2.0, 2014-06-24
+/COM   Reworked restart functionality in relation to Element Death.
+/COM
+/COM
+/COM Snow microstructure mechanical analysis utilizing yield strength as a damage criteria
+/COM Loading is performed in any direction desired.
+/COM NOTE: Academic License limits analyses to either 250k nodes or elements (whichever occurs first)
+/COM
+/COM This file imports an ANSYS mesh file (*.cdb), applies material properties, and appropriate initial boundary conditions
+/COM Solution process runs iteratively inspecting elements for exceeding yield strength following every solution step.
+/COM If elements exceed yield, they are "Killed" from the analysis and new load steps are applied.
+/COM The analsysis continues until 2 seperate bodies are created. Contact
+/COM ****************************************
+/COM
+
+! Quick restart is as follows:
+! FINISH$/CLE$/INPUT,File,ext
+/Batch
+/SHOW,PNG
+/filname,0930Shear,0
+/UIS,MSGPOP,4	!Turns off error messages
+!/NERR,,,,0,0
+/NERR,,,-1
+
+!Store the jobname as a string of any length for saving the results database 
+!later.  This is necessary for proper restart following and EKILL operation.
+*DIM,JobString,STRING,100,1,1
+*DO,s,1,100,8
+*get,JobStr,ACTIVE,,JOBNAM,,START,s
+JobString(s)=JobStr
+*ENDDO
+
+/UNIT,MPA	!Input units switched to mm,tonne(Mg),seconds,celcius (TOFFSET 273.0),Newton,millijoules,MPa
+! Density now in Mg/mm^3
+
+/COM
+/COM ****************************************
+/COM Read in ANSYS mesh (*.cdb)
+/COM
+!Windows Input
+!/INPUT,'0930_4x4x6Volume','cdb','C:\Doctoral Researach\Mechanical Testing\Radiation Recrystallization\Fabric Tensor and ANSYS\Linux FTP Mirror\PhD Work\MicroMechanics\FEA Files\ANSYS\2013-12-13 Shear New\0930\Mimics Data\',, 0    
+!Linux Input
+/INPUT,'0930_4x4x6Volume','cdb','/home/djwalters/PhDWork/ANSYS/2013-12-13ShearNew/0930/MimicsData',, 0
+
+! Note: Input file from Materialise export to ANSYS should already contain volume elements defaulted to element
+! type 1.  In the case of the 4 node tet, it is SOLID185.  10 node tets may also be used with SOLID186.  In either
+! case, these elements are normally 8 sided brick elements arranged into a tetrahedral formation.
+
+! Enter preprocesser
+/PREP7
+
+! Perform element checks while selecting all that meet error criteria
+CHECK,esel  
+!EPLOT  
+
+! Delete elements that meet error criteria, see .err log for details on error 
+EDELE,all  
+
+! Show model with coordinate triad in the bottom left 
+ESEL,all
+!EPLOT 
+/TRIAD,LBOT
+/VUP,,Z
+/VIEW,,.5,-1,.5
+!/REPLOT
+
+/COM ****************************************
+/COM Define Material Variables and convert to appropriate units
+
+DensitySI=916.7 	!kg/m^3
+!YoungsSI=93.3e8	!Pa, from Petrenko & Whitworth 1999 (previous value, can delete)
+YoungsSI=2e9		!Pa, from Kermani et. al 2008
+Poisson=0.325		!Dimensionless
+
+Density=DensitySI*(1/1000)*(1/(1000**3))	!Density in Mg/mm^3 (tonne/mm^3)
+Youngs=YoungsSI/(1e6)						!Youngs in MPa
+
+MaxPrin=3	!MPa, Maximum principal strength of ice (tension)
+MinPrin=5.5	!MPa, Minimum principal strength of ice (compression, enter abs value) from Kermani et. al 2007
+!MinPrin=35	!MPa, Minimum principle strength of ice (compression, enter abs value) 
+
+!**********************************************
+!**********************************************
+TopDisp=-0.002	! Top Displacement in mm (either in shear or compression)
+TopForce=0.003434	! Top normal force from weight of frame and snow (N)
+		
+TimeStep=abs(TopDisp)/0.2	! Sets the TimeStep equal to the displacement rate of lab tests (tests conducted at 0.2mm/sec)
+endloop=25
+!**********************************************
+!**********************************************
+
+! Define output array
+*DIM,ForceOut,ARRAY,endloop,7,1
+
+! Define material properties
+
+! First delete properties already assigned
+! Working only with 1 material, hence MAT = 1
+MPDE,DENS,1 
+MPDE,EX,1   
+MPDE,PRXY,1 
+! Assign new material properties as specified in the section above
+MPDATA,DENS,1,,Density 
+MPDATA,EX,1,,Youngs 
+MPDATA,PRXY,1,,Poisson
+KEYOPT,1,2,3  !Sets element type 1 (SOLID185) Keyopt2 to option 3.  
+!This utilizes the simplified enhanced strain formulation of element technology to prevent shear locking.
+!Option 2 is unnecessary since volumetric locking is not expected.
+
+! Set boundary conditions
+
+! Follwing set of commands locates the bottom set of nodes and sets them as a fixed condition
+nsel,all
+*get,minznode,NODE,0,mnloc,z
+!nsel,s,loc,z,minznode,minznode+0.25 
+!nplot  
+!D,ALL,ALL,0  !Not applied since first loadstep should be zero
+
+! Follwing set of commands locates the top set of nodes and sets them with the appropriate displacement
+nsel,all
+*get,maxznode,NODE,0,mxloc,z
+NSEL,S,LOC,Z,maxznode-0.5,maxznode
+*get,TopNodeCount,NODE,0,COUNT  
+!nsel,s,loc,z,maxznode-0.5,maxznode 
+!nplot  
+!D,ALL,UZ,TopDisp	!Displaces top selected nodes down 0.1mm
+
+nsel,all
+
+FINISH
+
+/SOLU
+ANTYPE,0,NEW
+NLGEOM,1
+NROPT,FULL
+NEQIT,30
+!NSUBST,5
+NCNV,2,0,0,0,0
+!NCNV,1
+! Added 2014-06-20
+RESCONTROL,DEFINE,ALL,LAST,2
+! Done adding
+FINISH
+
+!Turns off graphical solution tracking
+/GST,OFF
+!Begin saving frames for animation of element death
+!/SEG,DELE  !Deletes all currently stored segments
+!/SEG,MULTI
+
+*DO,i,1,endloop,1		!Do loop setting the counter i from 2 to 3 in steps of 1
+/GOPR
+/SOLU
+
+
+*IF,i,EQ,1,THEN
+TIME,0.0001
+
+*ELSE
+TIME,(i-1)*TimeStep
+
+*ENDIF
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!
+nsel,s,loc,z,minznode,minznode+0.25  
+D,ALL,ALL,0
+
+NSEL,S,LOC,Z,maxznode-0.5,maxznode 
+D,ALL,UX,(i-1)*TopDisp
+F,ALL,FZ,-TopForce/TopNodeCount
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/COM FINISHED APPLYING LOADS, NOW SOLVE
+NSEL,ALL
+ESEL,ALL
+SOLVE
+
+*GET,Convergence,Active,0,Solu,CNVG
+
+FINISH
+!Work started on this section of code 2014-04-21
+
+!Enter postprocessor to select failed elements.
+!Kill failed elements based on max and min principle stresses
+!Run next analysis step
+
+
+/POST1
+set,last
+ETABLE,MaxPrinS,S,1	!Stores maximum principle stress in table labeled "MaxPrinS"
+ETABLE,MinPrinS,S,3	!Stores minimum principle stress in table labeled "MinPrinS"
+*GET,CurTime,Active,0,Set,TIME
+nsel,s,loc,z,minznode,minznode+0.25
+
+FSUM,FX
+*GET,ReacFX,FSUM,0,ITEM,FX
+FSUM,FY
+*GET,ReacFY,FSUM,0,ITEM,FY
+FSUM,FZ
+*GET,ReacFZ,FSUM,0,ITEM,FZ
+nsel,all
+NSORT,U,X,0
+*GET,MaxDispX,SORT,,MIN
+nsel,all
+NSORT,U,Y,0
+*GET,MaxDispY,SORT,,MIN
+nsel,all
+NSORT,U,Z,0
+*GET,MaxDispZ,SORT,,MIN
+nsel,all
+
+ForceOut(i,1)=CurTime
+ForceOut(i,2)=MaxDispX
+ForceOut(i,3)=MaxDispY
+ForceOut(i,4)=MaxDispZ
+ForceOut(i,5)=ReacFX
+ForceOut(i,6)=ReacFY
+ForceOut(i,7)=ReacFZ
+
+!Plot current load step results for animation only showing the live elements
+ESEL,S,LIVE
+/CONT,,,-5,,3
+PLESOL,S,3
+ESEL,INVERT
+/REPLOT
+ESEL,ALL
+
+!Now select elements to be killed
+ESEL,S,ETAB,MaxPrinS,MaxPrin,,,0
+ESEL,A,ETAB,MinPrinS,-1e26,-MinPrin,,0
+
+!IMPORTANT!!!! Must save overwrite the rdb file after getting the ETABLEs for
+!specifying element death.  Otherwise, the restart wipes them out.  This 
+!function utilizes the current file's jobname as specified from the title of
+!the input file.
+
+SAVE,%JobString(1)%,rdb
+FINISH
+
+/SOLU
+
+*IF,i,LT,endloop,THEN
+ANTYPE,,REST
+*ENDIF
+
+EKILL,ALL
+ESEL,ALL
+
+FINISH
+/PREP7
+! Perform element checks while selecting all that meet error criteria
+CHECK,esel  
+!EPLOT  
+
+! Delete elements that meet error criteria, see .err log for details on error 
+EDELE,all   
+ESEL,all
+
+FINISH
+*IF,Convergence,EQ,0,EXIT
+
+*ENDDO
+
+!/SEG,OFF
+!ANIM,15,,0.5
+!/ANFILE,SAVE
+
+*MWRITE,ForceOut,ShearForce2,dat
+(7G15.6)
+
+
+
+/EOF
