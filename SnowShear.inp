@@ -218,7 +218,7 @@ FINISH
 !ANIM,15,,0.5
 !/ANFILE,SAVE
 
-*MWRITE,ForceOut,ShearForce2,dat
+*MWRITE,ForceOut,ShearForce,dat
 (7G15.6)
 
 
